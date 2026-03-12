@@ -94,7 +94,8 @@ def handle_resolution(call):
         bot.send_message(call.message.chat.id, f"❌ Không tải được video\n\n{e}")
 
 def run():
-    app.run(host="0.0.0.0", port=5000)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host="0.0.0.0", port=port)
 
 def keep_alive():
     t = Thread(target=run)
@@ -104,4 +105,5 @@ keep_alive()
 
 bot.delete_webhook(drop_pending_updates=True)
 bot.infinity_polling(skip_pending=True)
+
 
