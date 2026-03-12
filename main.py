@@ -7,7 +7,7 @@ from flask import Flask, send_file
 from threading import Thread
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-TOKEN = os.getenv("BOT_TOKEN")
+TOKEN = os.getenv("B7953484219:AAEGvUwwb-OH4ixVAvI4NPUzTU27L47EI9E")
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
