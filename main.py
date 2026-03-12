@@ -14,7 +14,6 @@ app = Flask(__name__)
 video_files = {}
 pending_urls = {}
 
-
 def delete_file_later(name, filename, delay=3600):
     def delete():
         time.sleep(delay)
@@ -24,7 +23,6 @@ def delete_file_later(name, filename, delay=3600):
             del video_files[name]
     threading.Thread(target=delete, daemon=True).start()
 
-
 def get_cookiefile(url):
     if "youtube.com" in url or "youtu.be" in url:
         return "cookies_youtube.txt"
@@ -33,7 +31,6 @@ def get_cookiefile(url):
     elif "tiktok.com" in url:
         return "cookies_tiktok.txt"
     return None
-
 
 def download_video(url, height):
     filename = f"video_{int(time.time())}.mp4"
@@ -52,18 +49,25 @@ def download_video(url, height):
         ydl.download([url])
     return filename
 
+@app.route('/')
+def home():
+    return "Bot is running"
+
+@app.route('/status')
+def status():
+    files = os.listdir('.')
+    cookies = {
+        'youtube': os.path.exists('cookies_youtube.txt'),
+        'facebook': os.path.exists('cookies_facebook.txt'),
+        'tiktok': os.path.exists('cookies_tiktok.txt')
+    }
+    return f"Files: {files}<br><br>Cookies found: {cookies}"
 
 @app.route('/video/<name>')
 def serve_video(name):
     if name in video_files and os.path.exists(video_files[name]):
         return send_file(video_files[name])
     return "File not found"
-
-
-@app.route('/')
-def home():
-    return "Bot is running"
-
 
 @bot.message_handler(func=lambda message: True)
 def handle(message):
@@ -83,7 +87,6 @@ def handle(message):
         InlineKeyboardButton("1080p", callback_data="res_1080")
     )
     bot.send_message(message.chat.id, "🎬 Chọn độ phân giải:", reply_markup=markup)
-
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("res_"))
 def handle_resolution(call):
@@ -111,7 +114,6 @@ def handle_resolution(call):
     except Exception as e:
         bot.send_message(call.message.chat.id, f"❌ Không tải được video\n\n{e}")
 
-
 def run():
     port = int(os.environ.get('PORT', 5000))
     app.run(host="0.0.0.0", port=port)
@@ -121,6 +123,5 @@ def keep_alive():
     t.start()
 
 keep_alive()
-
 bot.delete_webhook(drop_pending_updates=True)
 bot.infinity_polling(skip_pending=True)
