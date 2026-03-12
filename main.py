@@ -102,4 +102,6 @@ def keep_alive():
 
 keep_alive()
 
-bot.infinity_polling()
+bot.delete_webhook(drop_pending_updates=True)
+bot.infinity_polling(skip_pending=True)
+
