@@ -83,7 +83,7 @@ def handle_resolution(call):
             name = str(int(time.time()))
             video_files[name] = filename
             delete_file_later(name, filename, 3600)
-            download_link = f"https://YOUR-RAILWAY-URL/video/{name}"
+            download_link = f"https://video-telegram-bot.onrender.com/video/{name}"
             bot.send_message(call.message.chat.id, f"📥 Video lớn.\n\nTải tại:\n{download_link}\n\n⏳ Link tồn tại 1 giờ")
     except Exception as e:
         bot.send_message(call.message.chat.id, f"❌ Không tải được video\n\n{e}")
@@ -96,4 +96,5 @@ def keep_alive():
     t.start()
 
 keep_alive()
+
 bot.infinity_polling()
