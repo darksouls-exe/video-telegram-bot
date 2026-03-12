@@ -25,11 +25,19 @@ def delete_file_later(name, filename, delay=3600):
 
 def download_video(url, height):
     filename = f"video_{int(time.time())}.mp4"
-    ydl_opts = {'extractor_args': {
-    'youtube': {
-        'player_client': ['android', 'web']
+    ydl_opts =    ydl_opts = {
+        'outtmpl': filename,
+        'format': f'bestvideo[height<={height}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<={height}]+bestaudio/best[height<={height}]',
+        'merge_output_format': 'mp4',
+        'quiet': True,
+        'concurrent_fragment_downloads': 5,
+        'noplaylist': True,
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android', 'web']
+            }
+        }
     }
-}
         'outtmpl': filename,
         'format': f'bestvideo[height<={height}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<={height}]+bestaudio/best[height<={height}]',
         'merge_output_format': 'mp4',
@@ -102,4 +110,5 @@ def keep_alive():
 keep_alive()
 
 bot.infinity_polling()
+
 
