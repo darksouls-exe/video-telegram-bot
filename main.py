@@ -38,12 +38,7 @@ def get_resolutions(url):
 
     ydl_opts = {
         "quiet": True,
-        "skip_download": True,
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["android"]
-            }
-        }
+        "skip_download": True
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -84,14 +79,10 @@ def download_video(url, height):
 
         "noplaylist": True,
 
+        "retries": 10,
+
         "http_headers": {
             "User-Agent": "Mozilla/5.0"
-        },
-
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["android"]
-            }
         }
 
     }
@@ -211,13 +202,17 @@ def handle_resolution(call):
 # ================= RUN BOT =================
 def run_bot():
 
-    bot.delete_webhook(drop_pending_updates=True)
+    bot.remove_webhook()
 
     while True:
 
         try:
 
-            bot.infinity_polling(skip_pending=True)
+            bot.infinity_polling(
+                timeout=60,
+                long_polling_timeout=60,
+                skip_pending=True
+            )
 
         except Exception as e:
 
@@ -229,7 +224,9 @@ def run_bot():
 # ================= START SERVER =================
 if __name__ == "__main__":
 
-    threading.Thread(target=run_bot, daemon=True).start()
+    bot_thread = threading.Thread(target=run_bot)
+    bot_thread.daemon = True
+    bot_thread.start()
 
     port = int(os.environ.get("PORT", 10000))
 
