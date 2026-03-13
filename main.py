@@ -5,6 +5,7 @@ import time
 import threading
 from flask import Flask, send_file
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from urllib.parse import urlparse, parse_qs
 
 TOKEN = os.getenv("BOT_TOKEN")
 
@@ -17,6 +18,24 @@ app = Flask(__name__)
 
 video_files = {}
 pending_urls = {}
+
+# ================= CLEAN FACEBOOK URL =================
+def clean_facebook_url(url):
+
+    if "facebook.com/login" in url:
+
+        parsed = urlparse(url)
+
+        query = parse_qs(parsed.query)
+
+        if "next" in query:
+            return query["next"][0]
+
+    if "facebook.com/share" in url:
+        url = url.split("?")[0]
+
+    return url
+
 
 # ================= DELETE FILE =================
 def delete_file_later(name, filename, delay=3600):
@@ -38,11 +57,19 @@ def get_resolutions(url):
 
     ydl_opts = {
         "quiet": True,
-        "skip_download": True
+        "skip_download": True,
+        "noplaylist": True,
+        "socket_timeout": 30
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+
         info = ydl.extract_info(url, download=False)
+
+    duration = info.get("duration", 0)
+
+    if duration > 1800:
+        raise Exception("Video quá dài (>30 phút)")
 
     formats = info.get("formats", [])
 
@@ -50,10 +77,12 @@ def get_resolutions(url):
 
     for f in formats:
 
-        height = f.get("height")
+        if f.get("vcodec") != "none":
 
-        if height:
-            resolutions.add(height)
+            height = f.get("height")
+
+            if height:
+                resolutions.add(height)
 
     return sorted(resolutions)
 
@@ -67,7 +96,7 @@ def download_video(url, height):
 
         "outtmpl": filename,
 
-        "format": f"bestvideo[height<={height}]+bestaudio/best[height<={height}]",
+        "format": f"bestvideo[height<={height}]+bestaudio/best",
 
         "merge_output_format": "mp4",
 
@@ -77,12 +106,22 @@ def download_video(url, height):
 
         "socket_timeout": 30,
 
-        "noplaylist": True,
-
         "retries": 10,
 
+        "noplaylist": True,
+
+        "ffmpeg_location": "/usr/bin/ffmpeg",
+
         "http_headers": {
-            "User-Agent": "Mozilla/5.0"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": "https://www.facebook.com/"
+        },
+
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android"]
+            }
         }
 
     }
@@ -113,6 +152,8 @@ def serve_video(name):
 def handle(message):
 
     url = message.text.strip()
+
+    url = clean_facebook_url(url)
 
     if "http" not in url:
         bot.reply_to(message, "❌ Link không hợp lệ")
@@ -187,6 +228,9 @@ def handle_resolution(call):
 
             base_url = os.getenv("RENDER_EXTERNAL_URL")
 
+            if not base_url:
+                base_url = "https://your-render-url.onrender.com"
+
             link = f"{base_url}/video/{name}"
 
             bot.send_message(
@@ -211,6 +255,7 @@ def run_bot():
             bot.infinity_polling(
                 timeout=60,
                 long_polling_timeout=60,
+                request_timeout=120,
                 skip_pending=True
             )
 
