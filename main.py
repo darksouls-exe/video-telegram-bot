@@ -21,7 +21,6 @@ pending_urls = {}
 # ================= CLEAN URL =================
 def clean_url(url):
 
-    # decode nhiều lớp encode
     for _ in range(5):
         url = unquote(url)
 
@@ -30,36 +29,17 @@ def clean_url(url):
         parsed = urlparse(url)
         query = parse_qs(parsed.query)
 
-        # bỏ redirect login
         if "facebook.com/login" in url and "next" in query:
             url = query["next"][0]
             continue
 
-        # bỏ share_url
         if "share_url" in query:
             url = query["share_url"][0]
             continue
 
         break
 
-    # FIX LINK SHARE FACEBOOK
-    if "facebook.com/share/" in url:
-
-        parts = url.split("/")
-
-        if "v" in parts:
-            idx = parts.index("v")
-
-            if idx + 1 < len(parts):
-                video_id = parts[idx + 1]
-                url = f"https://www.facebook.com/watch/?v={video_id}"
-
-    # fb.watch
-    if "fb.watch" in url:
-        url = url.replace("fb.watch", "www.facebook.com/watch")
-
-    # chuyển sang mobile facebook
-    if "facebook.com" in url:
+    if "www.facebook.com" in url:
         url = url.replace("www.facebook.com", "m.facebook.com")
 
     return url
@@ -81,24 +61,32 @@ def delete_file_later(name, filename, delay=3600):
     threading.Thread(target=delete, daemon=True).start()
 
 
-# ================= GET RESOLUTIONS =================
-def get_resolutions(url):
+# ================= YTDLP OPTIONS =================
+def base_ydl_opts():
 
-    ydl_opts = {
+    return {
         "quiet": True,
-        "skip_download": True,
-        "noplaylist": True,
+        "retries": 10,
         "socket_timeout": 30,
+        "noplaylist": True,
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": "https://www.facebook.com/"
+        },
         "extractor_args": {
             "facebook": {
                 "allow_unavailable_formats": True
             }
-        },
-        "http_headers": {
-            "User-Agent": "Mozilla/5.0",
-            "Referer": "https://www.facebook.com/"
         }
     }
+
+
+# ================= GET RESOLUTIONS =================
+def get_resolutions(url):
+
+    ydl_opts = base_ydl_opts()
+    ydl_opts["skip_download"] = True
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
@@ -124,34 +112,14 @@ def download_video(url, height):
 
     filename = f"video_{int(time.time())}.mp4"
 
-    ydl_opts = {
+    ydl_opts = base_ydl_opts()
 
+    ydl_opts.update({
         "outtmpl": filename,
-
         "format": f"bestvideo[height<={height}]+bestaudio/best",
-
         "merge_output_format": "mp4",
-
-        "quiet": True,
-
-        "retries": 10,
-
-        "noplaylist": True,
-
-        "ffmpeg_location": "/usr/bin/ffmpeg",
-
-        "extractor_args": {
-            "facebook": {
-                "allow_unavailable_formats": True
-            }
-        },
-
-        "http_headers": {
-            "User-Agent": "Mozilla/5.0",
-            "Referer": "https://www.facebook.com/"
-        }
-
-    }
+        "ffmpeg_location": "/usr/bin/ffmpeg"
+    })
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([url])
@@ -208,8 +176,12 @@ def handle(message):
     markup = InlineKeyboardMarkup()
 
     for r in resolutions[:6]:
+
         markup.add(
-            InlineKeyboardButton(f"{r}p", callback_data=f"res_{r}")
+            InlineKeyboardButton(
+                f"{r}p",
+                callback_data=f"res_{r}"
+            )
         )
 
     bot.send_message(
@@ -262,9 +234,6 @@ def handle_resolution(call):
             delete_file_later(name, filename)
 
             base_url = os.getenv("RENDER_EXTERNAL_URL")
-
-            if not base_url:
-                base_url = "https://your-app.onrender.com"
 
             link = f"{base_url}/video/{name}"
 
