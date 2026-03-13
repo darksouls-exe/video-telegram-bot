@@ -32,21 +32,6 @@ def delete_file_later(name, filename, delay=3600):
     threading.Thread(target=delete, daemon=True).start()
 
 
-# ================= COOKIES =================
-def get_cookiefile(url):
-
-    if "youtube.com" in url or "youtu.be" in url:
-        return "cookies_youtube.txt"
-
-    elif "facebook.com" in url or "fb.watch" in url:
-        return "cookies_facebook.txt"
-
-    elif "tiktok.com" in url:
-        return "cookies_tiktok.txt"
-
-    return None
-
-
 # ================= GET RESOLUTIONS =================
 def get_resolutions(url):
 
@@ -77,8 +62,6 @@ def download_video(url, height):
 
     filename = f"video_{int(time.time())}.mp4"
 
-    cookiefile = get_cookiefile(url)
-
     ydl_opts = {
 
         "outtmpl": filename,
@@ -100,9 +83,6 @@ def download_video(url, height):
         }
 
     }
-
-    if cookiefile and os.path.exists(cookiefile):
-        ydl_opts["cookiefile"] = cookiefile
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([url])
@@ -206,7 +186,7 @@ def handle_resolution(call):
 
             delete_file_later(name, filename)
 
-            link = f"https://video-telegram-bot.onrender.com/video/{name}"
+            link = f"https://your-render-url.onrender.com/video/{name}"
 
             bot.send_message(
 
@@ -222,26 +202,22 @@ def handle_resolution(call):
 
 
 # ================= RUN SERVER =================
+@app.route("/ping")
+def ping():
+    return "alive"
+
+
 def run():
 
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT", 10000))
 
     app.run(host="0.0.0.0", port=port)
 
 
-def keep_alive():
-
-    t = Thread(target=run)
-
-    t.start()
-
-
-keep_alive()
-
+Thread(target=run).start()
 
 bot.delete_webhook(drop_pending_updates=True)
 
-# restart polling nếu lỗi
 while True:
 
     try:
