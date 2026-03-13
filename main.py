@@ -10,7 +10,7 @@ from urllib.parse import urlparse, parse_qs, unquote
 TOKEN = os.getenv("BOT_TOKEN")
 
 if not TOKEN:
-    raise ValueError("BOT_TOKEN not found")
+    raise Exception("BOT_TOKEN not found")
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
@@ -21,26 +21,28 @@ pending_urls = {}
 # ================= CLEAN URL =================
 def clean_url(url):
 
-    url = unquote(url)
+    # decode nhiều lớp encode
+    for _ in range(5):
+        url = unquote(url)
 
-    if "facebook.com/login" in url:
+    while True:
 
         parsed = urlparse(url)
         query = parse_qs(parsed.query)
 
-        if "next" in query:
+        if "facebook.com/login" in url and "next" in query:
             url = query["next"][0]
-
-    if "share_url=" in url:
-
-        parsed = urlparse(url)
-        query = parse_qs(parsed.query)
+            continue
 
         if "share_url" in query:
             url = query["share_url"][0]
+            continue
 
-    if "facebook.com/share" in url:
-        url = url.split("?")[0]
+        break
+
+    # chuyển sang mobile facebook
+    if "facebook.com" in url and "m.facebook.com" not in url:
+        url = url.replace("www.facebook.com", "m.facebook.com")
 
     return url
 
@@ -66,28 +68,24 @@ def get_resolutions(url):
     ydl_opts = {
         "quiet": True,
         "skip_download": True,
-        "noplaylist": True
+        "noplaylist": True,
+        "socket_timeout": 30,
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0",
+            "Referer": "https://www.facebook.com/"
+        }
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-
         info = ydl.extract_info(url, download=False)
-
-    duration = info.get("duration", 0)
-
-    if duration > 1800:
-        raise Exception("Video quá dài (>30 phút)")
 
     formats = info.get("formats", [])
 
     resolutions = set()
 
     for f in formats:
-
         if f.get("vcodec") != "none":
-
             height = f.get("height")
-
             if height:
                 resolutions.add(height)
 
