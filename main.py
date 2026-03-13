@@ -9,7 +9,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 TOKEN = os.getenv("BOT_TOKEN")
 
 if not TOKEN:
-    raise ValueError("BOT_TOKEN not found in environment variables")
+    raise ValueError("BOT_TOKEN not found")
 
 bot = telebot.TeleBot(TOKEN)
 
@@ -20,6 +20,7 @@ pending_urls = {}
 
 # ================= DELETE FILE =================
 def delete_file_later(name, filename, delay=3600):
+
     def delete():
         time.sleep(delay)
 
@@ -37,7 +38,12 @@ def get_resolutions(url):
 
     ydl_opts = {
         "quiet": True,
-        "skip_download": True
+        "skip_download": True,
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android"]
+            }
+        }
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -80,6 +86,12 @@ def download_video(url, height):
 
         "http_headers": {
             "User-Agent": "Mozilla/5.0"
+        },
+
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android"]
+            }
         }
 
     }
@@ -94,11 +106,6 @@ def download_video(url, height):
 @app.route("/")
 def home():
     return "Bot is running"
-
-
-@app.route("/ping")
-def ping():
-    return "alive"
 
 
 @app.route("/video/<name>")
@@ -152,6 +159,7 @@ def handle_resolution(call):
     key = str(call.message.chat.id)
 
     if key not in pending_urls:
+
         bot.answer_callback_query(call.id, "❌ Link hết hạn")
         return
 
@@ -186,9 +194,9 @@ def handle_resolution(call):
 
             delete_file_later(name, filename)
 
-            render_url = os.getenv("RENDER_EXTERNAL_URL")
+            base_url = os.getenv("RENDER_EXTERNAL_URL")
 
-            link = f"{render_url}/video/{name}"
+            link = f"{base_url}/video/{name}"
 
             bot.send_message(
                 call.message.chat.id,
