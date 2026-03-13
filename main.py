@@ -5,24 +5,23 @@ import time
 import threading
 from flask import Flask, send_file
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, unquote
 
 TOKEN = os.getenv("BOT_TOKEN")
 
 if not TOKEN:
     raise ValueError("BOT_TOKEN not found")
 
-print("Bot starting...")
-
 bot = telebot.TeleBot(TOKEN)
-
 app = Flask(__name__)
 
 video_files = {}
 pending_urls = {}
 
-# ================= CLEAN FACEBOOK URL =================
-def clean_facebook_url(url):
+# ================= CLEAN URL =================
+def clean_url(url):
+
+    url = unquote(url)
 
     if "facebook.com/login" in url:
 
@@ -30,7 +29,15 @@ def clean_facebook_url(url):
         query = parse_qs(parsed.query)
 
         if "next" in query:
-            return query["next"][0]
+            url = query["next"][0]
+
+    if "share_url=" in url:
+
+        parsed = urlparse(url)
+        query = parse_qs(parsed.query)
+
+        if "share_url" in query:
+            url = query["share_url"][0]
 
     if "facebook.com/share" in url:
         url = url.split("?")[0]
@@ -59,8 +66,7 @@ def get_resolutions(url):
     ydl_opts = {
         "quiet": True,
         "skip_download": True,
-        "noplaylist": True,
-        "socket_timeout": 30
+        "noplaylist": True
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -103,10 +109,6 @@ def download_video(url, height):
 
         "quiet": True,
 
-        "concurrent_fragment_downloads": 5,
-
-        "socket_timeout": 30,
-
         "retries": 10,
 
         "noplaylist": True,
@@ -145,11 +147,9 @@ def serve_video(name):
 @bot.message_handler(func=lambda message: True)
 def handle(message):
 
-    print("Message received:", message.text)
-
     url = message.text.strip()
 
-    url = clean_facebook_url(url)
+    url = clean_url(url)
 
     if not url.startswith("http"):
         bot.reply_to(message, "❌ Link không hợp lệ")
@@ -161,12 +161,12 @@ def handle(message):
 
     try:
 
-        bot.reply_to(message, "🔍 Đang đọc thông tin video...")
+        bot.reply_to(message, "🔍 Đang đọc video...")
 
         resolutions = get_resolutions(url)
 
         if not resolutions:
-            bot.reply_to(message, "❌ Không đọc được độ phân giải video")
+            bot.reply_to(message, "❌ Không đọc được độ phân giải")
             return
 
     except Exception as e:
@@ -198,7 +198,7 @@ def handle_resolution(call):
     url = pending_urls.pop(key)
 
     bot.edit_message_text(
-        f"⏳ Đang tải video {height}p...",
+        f"⏳ Đang tải {height}p...",
         call.message.chat.id,
         call.message.message_id
     )
@@ -227,18 +227,18 @@ def handle_resolution(call):
             base_url = os.getenv("RENDER_EXTERNAL_URL")
 
             if not base_url:
-                base_url = "https://your-render-url.onrender.com"
+                base_url = "https://your-app.onrender.com"
 
             link = f"{base_url}/video/{name}"
 
             bot.send_message(
                 call.message.chat.id,
-                f"📥 Video lớn.\n\nTải tại:\n{link}\n\n⏳ Link tồn tại 1 giờ"
+                f"📥 Video lớn\n\nTải tại:\n{link}\n\n⏳ Link tồn tại 1 giờ"
             )
 
     except Exception as e:
 
-        bot.send_message(call.message.chat.id, f"❌ Lỗi tải video\n\n{e}")
+        bot.send_message(call.message.chat.id, f"❌ Lỗi tải video\n{e}")
 
 
 # ================= RUN BOT =================
@@ -249,8 +249,6 @@ def run_bot():
     while True:
 
         try:
-
-            print("Bot polling started")
 
             bot.infinity_polling(
                 timeout=60,
@@ -265,7 +263,7 @@ def run_bot():
             time.sleep(5)
 
 
-# ================= START SERVER =================
+# ================= START =================
 if __name__ == "__main__":
 
     threading.Thread(target=run_bot).start()
