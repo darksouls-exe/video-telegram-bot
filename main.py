@@ -12,6 +12,8 @@ TOKEN = os.getenv("BOT_TOKEN")
 if not TOKEN:
     raise ValueError("BOT_TOKEN not found")
 
+print("Bot starting...")
+
 bot = telebot.TeleBot(TOKEN)
 
 app = Flask(__name__)
@@ -25,7 +27,6 @@ def clean_facebook_url(url):
     if "facebook.com/login" in url:
 
         parsed = urlparse(url)
-
         query = parse_qs(parsed.query)
 
         if "next" in query:
@@ -113,15 +114,8 @@ def download_video(url, height):
         "ffmpeg_location": "/usr/bin/ffmpeg",
 
         "http_headers": {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-            "Accept-Language": "en-US,en;q=0.9",
+            "User-Agent": "Mozilla/5.0",
             "Referer": "https://www.facebook.com/"
-        },
-
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["android"]
-            }
         }
 
     }
@@ -151,11 +145,13 @@ def serve_video(name):
 @bot.message_handler(func=lambda message: True)
 def handle(message):
 
+    print("Message received:", message.text)
+
     url = message.text.strip()
 
     url = clean_facebook_url(url)
 
-    if "http" not in url:
+    if not url.startswith("http"):
         bot.reply_to(message, "❌ Link không hợp lệ")
         return
 
@@ -164,6 +160,8 @@ def handle(message):
     pending_urls[key] = url
 
     try:
+
+        bot.reply_to(message, "🔍 Đang đọc thông tin video...")
 
         resolutions = get_resolutions(url)
 
@@ -252,10 +250,11 @@ def run_bot():
 
         try:
 
+            print("Bot polling started")
+
             bot.infinity_polling(
                 timeout=60,
                 long_polling_timeout=60,
-                request_timeout=120,
                 skip_pending=True
             )
 
@@ -269,9 +268,7 @@ def run_bot():
 # ================= START SERVER =================
 if __name__ == "__main__":
 
-    bot_thread = threading.Thread(target=run_bot)
-    bot_thread.daemon = True
-    bot_thread.start()
+    threading.Thread(target=run_bot).start()
 
     port = int(os.environ.get("PORT", 10000))
 
