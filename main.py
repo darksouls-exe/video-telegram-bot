@@ -30,18 +30,36 @@ def clean_url(url):
         parsed = urlparse(url)
         query = parse_qs(parsed.query)
 
+        # bỏ redirect login
         if "facebook.com/login" in url and "next" in query:
             url = query["next"][0]
             continue
 
+        # bỏ share_url
         if "share_url" in query:
             url = query["share_url"][0]
             continue
 
         break
 
+    # FIX LINK SHARE FACEBOOK
+    if "facebook.com/share/" in url:
+
+        parts = url.split("/")
+
+        if "v" in parts:
+            idx = parts.index("v")
+
+            if idx + 1 < len(parts):
+                video_id = parts[idx + 1]
+                url = f"https://www.facebook.com/watch/?v={video_id}"
+
+    # fb.watch
+    if "fb.watch" in url:
+        url = url.replace("fb.watch", "www.facebook.com/watch")
+
     # chuyển sang mobile facebook
-    if "facebook.com" in url and "m.facebook.com" not in url:
+    if "facebook.com" in url:
         url = url.replace("www.facebook.com", "m.facebook.com")
 
     return url
@@ -51,6 +69,7 @@ def clean_url(url):
 def delete_file_later(name, filename, delay=3600):
 
     def delete():
+
         time.sleep(delay)
 
         if os.path.exists(filename):
@@ -70,6 +89,11 @@ def get_resolutions(url):
         "skip_download": True,
         "noplaylist": True,
         "socket_timeout": 30,
+        "extractor_args": {
+            "facebook": {
+                "allow_unavailable_formats": True
+            }
+        },
         "http_headers": {
             "User-Agent": "Mozilla/5.0",
             "Referer": "https://www.facebook.com/"
@@ -84,8 +108,11 @@ def get_resolutions(url):
     resolutions = set()
 
     for f in formats:
+
         if f.get("vcodec") != "none":
+
             height = f.get("height")
+
             if height:
                 resolutions.add(height)
 
@@ -112,6 +139,12 @@ def download_video(url, height):
         "noplaylist": True,
 
         "ffmpeg_location": "/usr/bin/ffmpeg",
+
+        "extractor_args": {
+            "facebook": {
+                "allow_unavailable_formats": True
+            }
+        },
 
         "http_headers": {
             "User-Agent": "Mozilla/5.0",
@@ -175,9 +208,15 @@ def handle(message):
     markup = InlineKeyboardMarkup()
 
     for r in resolutions[:6]:
-        markup.add(InlineKeyboardButton(f"{r}p", callback_data=f"res_{r}"))
+        markup.add(
+            InlineKeyboardButton(f"{r}p", callback_data=f"res_{r}")
+        )
 
-    bot.send_message(message.chat.id, "🎬 Chọn độ phân giải:", reply_markup=markup)
+    bot.send_message(
+        message.chat.id,
+        "🎬 Chọn độ phân giải:",
+        reply_markup=markup
+    )
 
 
 # ================= HANDLE RESOLUTION =================
@@ -191,7 +230,7 @@ def handle_resolution(call):
         bot.answer_callback_query(call.id, "❌ Link hết hạn")
         return
 
-    height = call.data.split("_")[1]
+    height = int(call.data.split("_")[1])
 
     url = pending_urls.pop(key)
 
@@ -236,7 +275,10 @@ def handle_resolution(call):
 
     except Exception as e:
 
-        bot.send_message(call.message.chat.id, f"❌ Lỗi tải video\n{e}")
+        bot.send_message(
+            call.message.chat.id,
+            f"❌ Lỗi tải video\n{e}"
+        )
 
 
 # ================= RUN BOT =================
