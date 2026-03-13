@@ -4,10 +4,12 @@ import os
 import time
 import threading
 from flask import Flask, send_file
-from threading import Thread
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 TOKEN = os.getenv("BOT_TOKEN")
+
+if not TOKEN:
+    raise ValueError("BOT_TOKEN not found in environment variables")
 
 bot = telebot.TeleBot(TOKEN)
 
@@ -18,9 +20,7 @@ pending_urls = {}
 
 # ================= DELETE FILE =================
 def delete_file_later(name, filename, delay=3600):
-
     def delete():
-
         time.sleep(delay)
 
         if os.path.exists(filename):
@@ -96,6 +96,11 @@ def home():
     return "Bot is running"
 
 
+@app.route("/ping")
+def ping():
+    return "alive"
+
+
 @app.route("/video/<name>")
 def serve_video(name):
 
@@ -147,7 +152,6 @@ def handle_resolution(call):
     key = str(call.message.chat.id)
 
     if key not in pending_urls:
-
         bot.answer_callback_query(call.id, "❌ Link hết hạn")
         return
 
@@ -156,13 +160,9 @@ def handle_resolution(call):
     url = pending_urls.pop(key)
 
     bot.edit_message_text(
-
         f"⏳ Đang tải video {height}p...",
-
         call.message.chat.id,
-
         call.message.message_id
-
     )
 
     try:
@@ -186,14 +186,13 @@ def handle_resolution(call):
 
             delete_file_later(name, filename)
 
-            link = f"https://your-render-url.onrender.com/video/{name}"
+            render_url = os.getenv("RENDER_EXTERNAL_URL")
+
+            link = f"{render_url}/video/{name}"
 
             bot.send_message(
-
                 call.message.chat.id,
-
                 f"📥 Video lớn.\n\nTải tại:\n{link}\n\n⏳ Link tồn tại 1 giờ"
-
             )
 
     except Exception as e:
@@ -201,31 +200,29 @@ def handle_resolution(call):
         bot.send_message(call.message.chat.id, f"❌ Lỗi tải video\n\n{e}")
 
 
-# ================= RUN SERVER =================
-@app.route("/ping")
-def ping():
-    return "alive"
+# ================= RUN BOT =================
+def run_bot():
+
+    bot.delete_webhook(drop_pending_updates=True)
+
+    while True:
+
+        try:
+
+            bot.infinity_polling(skip_pending=True)
+
+        except Exception as e:
+
+            print("Bot restart:", e)
+
+            time.sleep(5)
 
 
-def run():
+# ================= START SERVER =================
+if __name__ == "__main__":
+
+    threading.Thread(target=run_bot, daemon=True).start()
 
     port = int(os.environ.get("PORT", 10000))
 
     app.run(host="0.0.0.0", port=port)
-
-
-Thread(target=run).start()
-
-bot.delete_webhook(drop_pending_updates=True)
-
-while True:
-
-    try:
-
-        bot.infinity_polling(skip_pending=True)
-
-    except Exception as e:
-
-        print("Bot restart:", e)
-
-        time.sleep(5)
