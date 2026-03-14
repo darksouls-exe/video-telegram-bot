@@ -6,6 +6,7 @@ import threading
 from flask import Flask, send_file
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from urllib.parse import urlparse, parse_qs, unquote
+import requests
 
 TOKEN = os.getenv("BOT_TOKEN")
 
@@ -24,6 +25,13 @@ def clean_url(url):
     for _ in range(5):
         url = unquote(url)
 
+    # follow redirect (fix fb.watch)
+    try:
+        r = requests.head(url, allow_redirects=True, timeout=10)
+        url = r.url
+    except:
+        pass
+
     while True:
 
         parsed = urlparse(url)
@@ -41,6 +49,9 @@ def clean_url(url):
 
     if "www.facebook.com" in url:
         url = url.replace("www.facebook.com", "m.facebook.com")
+
+    if "fb.watch" in url:
+        url = url.replace("fb.watch", "m.facebook.com")
 
     return url
 
