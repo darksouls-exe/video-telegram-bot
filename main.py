@@ -143,11 +143,10 @@ def serve_video(name):
 
 
 # ================= HANDLE MESSAGE =================
-@bot.message_handler(func=lambda message: True)
+@bot.message_handler(content_types=["text"])
 def handle(message):
 
     url = message.text.strip()
-
     url = clean_url(url)
 
     if not url.startswith("http"):
@@ -253,6 +252,8 @@ def handle_resolution(call):
 # ================= RUN BOT =================
 def run_bot():
 
+    print("BOT STARTED")
+
     bot.remove_webhook()
 
     while True:
@@ -275,8 +276,10 @@ def run_bot():
 # ================= START =================
 if __name__ == "__main__":
 
-    threading.Thread(target=run_bot).start()
+    threading.Thread(target=run_bot, daemon=True).start()
 
     port = int(os.environ.get("PORT", 10000))
 
-    app.run(host="0.0.0.0", port=port)
+    print("SERVER STARTED")
+
+    app.run(host="0.0.0.0", port=port, threaded=True)
