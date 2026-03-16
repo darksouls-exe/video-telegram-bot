@@ -5,7 +5,7 @@ import time
 import threading
 from flask import Flask, send_file
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from urllib.parse import urlparse, unquote
+from urllib.parse import urlparse, unquote, parse_qs, urlencode, urlunparse
 import requests
 
 TOKEN = os.getenv("BOT_TOKEN", "7953484219:AAEGvUwwb-OH4ixVAvI4NPUzTU27L47EI9E")
@@ -28,7 +28,12 @@ def clean_url(url):
         pass
     if "facebook.com" in url:
         parsed = urlparse(url)
-        url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+        params = parse_qs(parsed.query)
+        essential = ['v', 'story_fbid', 'id', 'set', 'vh']
+        filtered = {k: v for k, v in params.items() if k in essential}
+        new_query = urlencode(filtered, doseq=True)
+        url = urlunparse((parsed.scheme, parsed.netloc, parsed.path,
+                          parsed.params, new_query, ''))
     return url
 
 
