@@ -6,6 +6,7 @@ import threading
 from flask import Flask, send_file
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from urllib.parse import unquote
+import requests
 
 TOKEN = os.getenv("BOT_TOKEN", "7953484219:AAEGvUwwb-OH4ixVAvI4NPUzTU27L47EI9E")
 
@@ -15,11 +16,30 @@ app = Flask(__name__)
 video_files = {}
 pending_urls = {}
 
+SHORT_DOMAINS = (
+    "fb.watch", "fb.gg", "m.facebook.com/share",
+    "vt.tiktok.com", "vm.tiktok.com",
+    "youtu.be", "t.co", "bit.ly", "tinyurl.com"
+)
+
 
 def clean_url(url):
     for _ in range(3):
         url = unquote(url)
     url = url.strip()
+    if any(d in url for d in SHORT_DOMAINS):
+        try:
+            r = requests.get(
+                url, allow_redirects=True, timeout=15,
+                headers={"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15"}
+            )
+            if r.url and r.url.startswith("http"):
+                url = r.url
+        except Exception as e:
+            print("Redirect resolve error:", e)
+    if "facebook.com" in url:
+        url = url.replace("m.facebook.com", "www.facebook.com")
+        url = url.replace("//web.facebook.com", "//www.facebook.com")
     return url
 
 
@@ -61,19 +81,12 @@ def base_ydl_opts(url=None):
     return opts
 
 
-def get_resolutions(url):
+def validate_url(url):
     ydl_opts = base_ydl_opts(url)
     ydl_opts["skip_download"] = True
+    ydl_opts["extract_flat"] = True
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=False)
-    formats = info.get("formats", [])
-    resolutions = set()
-    for f in formats:
-        if f.get("vcodec") not in (None, "none"):
-            height = f.get("height")
-            if height:
-                resolutions.add(height)
-    return sorted(resolutions)
+        ydl.extract_info(url, download=False)
 
 
 def download_video(url, height):
@@ -91,23 +104,26 @@ def download_video(url, height):
 
 @app.route("/")
 def home():
-    return "Bot is running"
+    return "Bot is running", 200
+
+@app.route("/health")
+def health():
+    return "OK", 200
 
 @app.route("/status")
 def status():
-    files = os.listdir(".")
     cookies = {
         "youtube": os.path.exists("cookies_youtube.txt"),
         "facebook": os.path.exists("cookies_facebook.txt"),
         "tiktok": os.path.exists("cookies_tiktok.txt")
     }
-    return f"Files: {files}<br><br>Cookies found: {cookies}"
+    return f"Bot running<br>Cookies: {cookies}", 200
 
 @app.route("/video/<name>")
 def serve_video(name):
     if name in video_files and os.path.exists(video_files[name]):
         return send_file(video_files[name])
-    return "File not found"
+    return "File not found", 404
 
 
 @bot.message_handler(content_types=["text"])
@@ -120,26 +136,20 @@ def handle(message):
     key = str(message.chat.id)
     pending_urls[key] = url
     try:
-        bot.reply_to(message, "🔍 Đang đọc video...")
-        resolutions = get_resolutions(url)
-        if not resolutions:
-            markup = InlineKeyboardMarkup()
-            markup.row(
-                InlineKeyboardButton("360p", callback_data="res_360"),
-                InlineKeyboardButton("480p", callback_data="res_480")
-            )
-            markup.row(
-                InlineKeyboardButton("720p", callback_data="res_720"),
-                InlineKeyboardButton("1080p", callback_data="res_1080")
-            )
-            bot.send_message(message.chat.id, "🎬 Chọn độ phân giải:", reply_markup=markup)
-            return
+        bot.reply_to(message, "🔍 Đang kiểm tra link...")
+        validate_url(url)
     except Exception as e:
         bot.reply_to(message, f"❌ Không đọc được video\n\n{e}")
         return
     markup = InlineKeyboardMarkup()
-    for r in sorted(resolutions)[:6]:
-        markup.add(InlineKeyboardButton(f"{r}p", callback_data=f"res_{r}"))
+    markup.row(
+        InlineKeyboardButton("360p", callback_data="res_360"),
+        InlineKeyboardButton("480p", callback_data="res_480")
+    )
+    markup.row(
+        InlineKeyboardButton("720p", callback_data="res_720"),
+        InlineKeyboardButton("1080p", callback_data="res_1080")
+    )
     bot.send_message(message.chat.id, "🎬 Chọn độ phân giải:", reply_markup=markup)
 
 
@@ -185,5 +195,5 @@ def run_bot():
 if __name__ == "__main__":
     threading.Thread(target=run_bot, daemon=True).start()
     port = int(os.environ.get("PORT", 10000))
-    print("SERVER STARTED")
+    print(f"SERVER STARTED on port {port}")
     app.run(host="0.0.0.0", port=port, threaded=True)
