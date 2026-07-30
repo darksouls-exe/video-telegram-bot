@@ -71,14 +71,28 @@ def get_cookiefile(url):
 def base_ydl_opts(url=None):
     opts = {
         "quiet": True,
-        "retries": 10,
-        "socket_timeout": 30,
+        "retries": 5,
+        "fragment_retries": 5,
+        "socket_timeout": 60,
         "noplaylist": True,
+        "geo_bypass": True,
+        "geo_bypass_country": "US",
         "http_headers": {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Sec-Fetch-Mode": "navigate",
         }
     }
+    if url and is_facebook_url(url):
+        opts["extractor_args"] = {
+            "facebook": {"webpage_download_timeout": ["60"]}
+        }
     if url:
         cookiefile = get_cookiefile(url)
         if cookiefile and os.path.exists(cookiefile):
@@ -213,8 +227,18 @@ def handle_resolution(call):
 
     except Exception as e:
         print(f"[handle_resolution] Error: {e}")
+        err = str(e)
+        if "timed out" in err.lower() or "timeout" in err.lower() or "connection" in err.lower():
+            msg = (
+                "❌ Server bị Facebook chặn kết nối (timeout)\n\n"
+                "Cách khắc phục:\n"
+                "• Thêm file cookies_facebook.txt vào Render\n"
+                "• Export cookies từ trình duyệt bằng extension 'Get cookies.txt LOCALLY'"
+            )
+        else:
+            msg = f"❌ Lỗi tải video\n\n{e}"
         try:
-            bot.send_message(call.message.chat.id, f"❌ Lỗi tải video\n\n{e}")
+            bot.send_message(call.message.chat.id, msg)
         except Exception:
             pass
 
