@@ -1,6 +1,7 @@
 import telebot
 import yt_dlp
 import os
+import re
 import time
 import threading
 import subprocess
@@ -45,10 +46,48 @@ SHORT_DOMAINS = (
 )
 
 
+def resolve_facebook_share(url):
+    """
+    Chuyển link 'Sao chép liên kết' của Facebook sang URL chuẩn mà yt-dlp đọc được.
+    facebook.com/share/v/ID/   → facebook.com/watch?v=ID   (video thường)
+    facebook.com/share/r/CODE/ → facebook.com/reel/CODE    (reel)
+    facebook.com/share/p/CODE/ → facebook.com/permalink/CODE (post video)
+    """
+    # /share/v/NUMERIC_ID/
+    m = re.search(r'facebook\.com/share/v/(\d+)', url)
+    if m:
+        return f"https://www.facebook.com/watch?v={m.group(1)}"
+
+    # /share/r/CODE/ (reel)
+    m = re.search(r'facebook\.com/share/r/([^/?&#]+)', url)
+    if m:
+        return f"https://www.facebook.com/reel/{m.group(1)}"
+
+    # /share/p/CODE/ hoặc /share/CODE/ dạng khác
+    m = re.search(r'facebook\.com/share/p/([^/?&#]+)', url)
+    if m:
+        return f"https://www.facebook.com/video/embed?video_id={m.group(1)}"
+
+    return url
+
+
 def clean_url(url):
     for _ in range(3):
         url = unquote(url)
     url = url.strip()
+
+    # Chuẩn hoá Facebook URL trước
+    if "facebook.com" in url:
+        url = url.replace("m.facebook.com", "www.facebook.com")
+        url = url.replace("//web.facebook.com", "//www.facebook.com")
+
+    # Chuyển link share mới → URL chuẩn yt-dlp nhận được
+    if "facebook.com/share/" in url:
+        url = resolve_facebook_share(url)
+        print(f"[clean_url] Facebook share → {url}")
+        return url
+
+    # Resolve link rút gọn (fb.watch, youtu.be, bit.ly...)
     if any(d in url for d in SHORT_DOMAINS):
         try:
             r = requests.get(
@@ -61,12 +100,14 @@ def clean_url(url):
                 }
             )
             if r.url and r.url.startswith("http"):
-                url = r.url
+                resolved = r.url
+                # Nếu sau redirect vẫn là share URL → chuyển tiếp
+                if "facebook.com/share/" in resolved:
+                    resolved = resolve_facebook_share(resolved)
+                url = resolved
         except Exception as e:
             print(f"Redirect resolve error: {e}")
-    if "facebook.com" in url:
-        url = url.replace("m.facebook.com", "www.facebook.com")
-        url = url.replace("//web.facebook.com", "//www.facebook.com")
+
     return url
 
 
