@@ -231,9 +231,13 @@ def handle_resolution(call):
         if "timed out" in err.lower() or "timeout" in err.lower() or "connection" in err.lower():
             msg = (
                 "❌ Server bị Facebook chặn kết nối (timeout)\n\n"
-                "Cách khắc phục:\n"
-                "• Thêm file cookies_facebook.txt vào Render\n"
-                "• Export cookies từ trình duyệt bằng extension 'Get cookies.txt LOCALLY'"
+                "Cách khắc phục: thêm file cookies_facebook.txt vào Render\n"
+                "(Export bằng extension 'Get cookies.txt LOCALLY')"
+            )
+        elif "cannot parse data" in err.lower() or "please report" in err.lower():
+            msg = (
+                "❌ yt-dlp quá cũ, không đọc được Facebook\n\n"
+                "Cách khắc phục: vào Render dashboard → Manual Deploy để rebuild"
             )
         else:
             msg = f"❌ Lỗi tải video\n\n{e}"
