@@ -16,9 +16,9 @@ app = Flask(__name__)
 video_files = {}
 pending_urls = {}
 
-# ================= CLEAN URL =================
 SHORT_DOMAINS = (
-    "fb.watch", "fb.gg", "m.facebook.com/share",
+    "fb.watch", "fb.gg",
+    "m.facebook.com/share", "www.facebook.com/share",
     "vt.tiktok.com", "vm.tiktok.com",
     "youtu.be", "t.co", "bit.ly", "tinyurl.com"
 )
@@ -28,26 +28,19 @@ def clean_url(url):
     for _ in range(3):
         url = unquote(url)
     url = url.strip()
-
     if any(d in url for d in SHORT_DOMAINS):
         try:
             r = requests.get(
-                url,
-                allow_redirects=True,
-                timeout=15,
-                headers={
-                    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15"
-                }
+                url, allow_redirects=True, timeout=15,
+                headers={"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15"}
             )
             if r.url and r.url.startswith("http"):
                 url = r.url
         except Exception as e:
             print("Redirect resolve error:", e)
-
     if "facebook.com" in url:
         url = url.replace("m.facebook.com", "www.facebook.com")
         url = url.replace("//web.facebook.com", "//www.facebook.com")
-
     return url
 
 
@@ -55,7 +48,6 @@ def is_facebook_url(url):
     return "facebook.com" in url or "fb.watch" in url or "fb.gg" in url
 
 
-# ================= DELETE FILE =================
 def delete_file_later(name, filename, delay=3600):
     def delete():
         time.sleep(delay)
@@ -66,7 +58,6 @@ def delete_file_later(name, filename, delay=3600):
     threading.Thread(target=delete, daemon=True).start()
 
 
-# ================= YTDLP OPTIONS =================
 def get_cookiefile(url):
     if "youtube.com" in url or "youtu.be" in url:
         return "cookies_youtube.txt"
@@ -95,22 +86,15 @@ def base_ydl_opts(url=None):
     return opts
 
 
-# ================= VALIDATE URL =================
 def validate_url(url):
-    """
-    Validate URL. For Facebook, skip extract_flat (not supported) and
-    just do a quick info extraction without downloading.
-    """
     ydl_opts = base_ydl_opts(url)
     ydl_opts["skip_download"] = True
-    # Do NOT use extract_flat=True — breaks Facebook extractor
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
         if not info:
             raise Exception("Không lấy được thông tin video")
 
 
-# ================= DOWNLOAD VIDEO =================
 def download_video(url, height):
     filename = f"video_{int(time.time())}.mp4"
     ydl_opts = base_ydl_opts(url)
@@ -128,16 +112,26 @@ def download_video(url, height):
     return filename
 
 
-# ================= FLASK =================
+def resolution_markup():
+    markup = InlineKeyboardMarkup()
+    markup.row(
+        InlineKeyboardButton("360p", callback_data="res_360"),
+        InlineKeyboardButton("480p", callback_data="res_480")
+    )
+    markup.row(
+        InlineKeyboardButton("720p", callback_data="res_720"),
+        InlineKeyboardButton("1080p", callback_data="res_1080")
+    )
+    return markup
+
+
 @app.route("/")
 def home():
     return "Bot is running", 200
 
-
 @app.route("/health")
 def health():
     return "OK", 200
-
 
 @app.route("/status")
 def status():
@@ -148,7 +142,6 @@ def status():
     }
     return f"Bot running<br>Cookies: {cookies}", 200
 
-
 @app.route("/video/<name>")
 def serve_video(name):
     if name in video_files and os.path.exists(video_files[name]):
@@ -156,74 +149,53 @@ def serve_video(name):
     return "File not found", 404
 
 
-# ================= HANDLE MESSAGE =================
 @bot.message_handler(content_types=["text"])
 def handle(message):
-    url = message.text.strip()
-    url = clean_url(url)
-
-    if not url.startswith("http"):
-        bot.reply_to(message, "❌ Gửi link video hợp lệ")
-        return
-
-    key = str(message.chat.id)
-    pending_urls[key] = url
-
-    # Facebook: bỏ qua bước validate (thường yêu cầu đăng nhập/cookie)
-    # Nếu link sai sẽ báo lỗi ở bước tải
-    if is_facebook_url(url):
-        markup = InlineKeyboardMarkup()
-        markup.row(
-            InlineKeyboardButton("360p", callback_data="res_360"),
-            InlineKeyboardButton("480p", callback_data="res_480")
-        )
-        markup.row(
-            InlineKeyboardButton("720p", callback_data="res_720"),
-            InlineKeyboardButton("1080p", callback_data="res_1080")
-        )
-        bot.reply_to(message, "🎬 Chọn độ phân giải:", reply_markup=markup)
-        return
-
-    # Các nền tảng khác: validate trước
     try:
+        url = message.text.strip()
+        if not url.startswith("http"):
+            bot.reply_to(message, "❌ Gửi link video hợp lệ")
+            return
+
+        url = clean_url(url)
+        key = str(message.chat.id)
+        pending_urls[key] = url
+
+        if is_facebook_url(url):
+            bot.reply_to(message, "🎬 Chọn độ phân giải:", reply_markup=resolution_markup())
+            return
+
         bot.reply_to(message, "🔍 Đang kiểm tra link...")
-        validate_url(url)
+        try:
+            validate_url(url)
+        except Exception as e:
+            bot.reply_to(message, f"❌ Không đọc được video\n\n{e}")
+            return
+
+        bot.send_message(message.chat.id, "🎬 Chọn độ phân giải:", reply_markup=resolution_markup())
+
     except Exception as e:
-        bot.reply_to(message, f"❌ Không đọc được video\n\n{e}")
-        return
-
-    markup = InlineKeyboardMarkup()
-    markup.row(
-        InlineKeyboardButton("360p", callback_data="res_360"),
-        InlineKeyboardButton("480p", callback_data="res_480")
-    )
-    markup.row(
-        InlineKeyboardButton("720p", callback_data="res_720"),
-        InlineKeyboardButton("1080p", callback_data="res_1080")
-    )
-    bot.send_message(message.chat.id, "🎬 Chọn độ phân giải:", reply_markup=markup)
+        print(f"[handle] Unexpected error: {e}")
+        try:
+            bot.reply_to(message, f"❌ Lỗi không xác định\n\n{e}")
+        except Exception:
+            pass
 
 
-# ================= HANDLE RESOLUTION =================
 @bot.callback_query_handler(func=lambda call: call.data.startswith("res_"))
 def handle_resolution(call):
-    key = str(call.message.chat.id)
-
-    if key not in pending_urls:
-        bot.answer_callback_query(call.id, "❌ Link hết hạn, gửi lại link mới")
-        return
-
-    height = int(call.data.split("_")[1])
-    url = pending_urls.pop(key)
-
-    bot.answer_callback_query(call.id)
-    bot.edit_message_text(
-        f"⏳ Đang tải {height}p...",
-        call.message.chat.id,
-        call.message.message_id
-    )
-
     try:
+        key = str(call.message.chat.id)
+        if key not in pending_urls:
+            bot.answer_callback_query(call.id, "❌ Link hết hạn, gửi lại link mới")
+            return
+
+        height = int(call.data.split("_")[1])
+        url = pending_urls.pop(key)
+
+        bot.answer_callback_query(call.id)
+        bot.edit_message_text(f"⏳ Đang tải {height}p...", call.message.chat.id, call.message.message_id)
+
         filename = download_video(url, height)
         size = os.path.getsize(filename)
 
@@ -237,16 +209,16 @@ def handle_resolution(call):
             delete_file_later(name, filename)
             base_url = os.getenv("RENDER_EXTERNAL_URL", "https://video-telegram-bot.onrender.com")
             link = f"{base_url}/video/{name}"
-            bot.send_message(
-                call.message.chat.id,
-                f"📥 Video lớn\n\nTải tại:\n{link}\n\n⏳ Link tồn tại 1 giờ"
-            )
+            bot.send_message(call.message.chat.id, f"📥 Video lớn\n\nTải tại:\n{link}\n\n⏳ Link tồn tại 1 giờ")
 
     except Exception as e:
-        bot.send_message(call.message.chat.id, f"❌ Lỗi tải video\n\n{e}")
+        print(f"[handle_resolution] Error: {e}")
+        try:
+            bot.send_message(call.message.chat.id, f"❌ Lỗi tải video\n\n{e}")
+        except Exception:
+            pass
 
 
-# ================= RUN BOT =================
 def run_bot():
     print("BOT STARTED")
     bot.remove_webhook()
@@ -258,7 +230,6 @@ def run_bot():
             time.sleep(5)
 
 
-# ================= START =================
 if __name__ == "__main__":
     threading.Thread(target=run_bot, daemon=True).start()
     port = int(os.environ.get("PORT", 10000))
