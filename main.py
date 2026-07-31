@@ -1,8 +1,9 @@
 import telebot, yt_dlp, os, re, time, threading, subprocess, sys
-from flask import Flask, send_file, request, redirect
+from flask import Flask, send_file, request
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from urllib.parse import unquote
 import requests
+from bs4 import BeautifulSoup
 
 TOKEN = os.getenv("BOT_TOKEN", "")
 bot   = telebot.TeleBot(TOKEN)
@@ -35,7 +36,6 @@ def normalize_fb(url):
         m = re.search(pat, url)
         if m:
             return f"https://m.facebook.com/watch/?v={m.group(1)}"
-    # /share/r/CODE (alphanumeric)
     m = re.search(r'facebook\.com/share/r/([^/?&#]+)', url)
     if m:
         return f"https://www.facebook.com/reel/{m.group(1)}"
@@ -45,7 +45,6 @@ def clean_url(url):
     for _ in range(3):
         url = unquote(url)
     url = url.strip()
-
     if any(d in url for d in ("facebook.com", "fb.watch", "fb.gg")):
         url = url.replace("//web.facebook.com", "//www.facebook.com") \
                  .replace("//m.facebook.com", "//www.facebook.com")
@@ -56,8 +55,6 @@ def clean_url(url):
                 url = r.url if r.url.startswith("http") else url
             except Exception: pass
         return normalize_fb(url)
-
-    # Other shortlinks
     if any(d in url for d in ("youtu.be", "vt.tiktok.com", "vm.tiktok.com",
                                "t.co", "bit.ly", "tinyurl.com")):
         try:
@@ -86,9 +83,8 @@ def ydl_opts(url=None, extra=None):
     }
     if url and is_fb(url):
         opts["extractor_args"] = {"facebook": {"webpage_download_timeout": ["60"]}}
-        cookie = "cookies_facebook.txt"
-        if os.path.exists(cookie):
-            opts["cookiefile"] = cookie
+        if os.path.exists("cookies_facebook.txt"):
+            opts["cookiefile"] = "cookies_facebook.txt"
     elif url and "youtube.com" in url:
         if os.path.exists("cookies_youtube.txt"):
             opts["cookiefile"] = "cookies_youtube.txt"
@@ -99,7 +95,49 @@ def ydl_opts(url=None, extra=None):
         opts.update(extra)
     return opts
 
-# ── Download with format fallback ─────────────────────────────────────────────
+# ── Fallback: tải qua snapsave.app ───────────────────────────────────────────
+def download_fb_via_snapsave(url, height):
+    session = requests.Session()
+    session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36"})
+
+    r = session.get("https://snapsave.app/", timeout=15)
+    soup = BeautifulSoup(r.text, "html.parser")
+    token_input = soup.find("input", {"name": "token"})
+    token = token_input["value"] if token_input else ""
+
+    resp = session.post("https://snapsave.app/action.php", data={"url": url, "token": token},
+                        headers={"Referer": "https://snapsave.app/"}, timeout=20)
+    soup2 = BeautifulSoup(resp.text, "html.parser")
+
+    links = []
+    for a in soup2.find_all("a", href=True):
+        href = a["href"]
+        if href.startswith("http") and any(x in href for x in ("fbcdn", "facebook", "cdninstagram", "video")):
+            label = a.get_text(strip=True).lower()
+            quality = 1080 if "hd" in label else 480 if "sd" in label else 360
+            links.append((quality, href))
+
+    if not links:
+        raise Exception("snapsave không trả về link")
+
+    links.sort(key=lambda x: abs(x[0] - height))
+    chosen = links[0][1]
+
+    fn = f"video_{int(time.time())}.mp4"
+    with session.get(chosen, stream=True, timeout=60) as dl:
+        dl.raise_for_status()
+        with open(fn, "wb") as f:
+            for chunk in dl.iter_content(chunk_size=1024*1024):
+                f.write(chunk)
+
+    if os.path.exists(fn) and os.path.getsize(fn) > 0:
+        return fn
+    raise Exception("File tải về rỗng")
+
+# ── Download ──────────────────────────────────────────────────────────────────
+_FB_BLOCK_KEYWORDS = ("cannot parse", "unsupported url", "please report",
+                      "login", "sign in", "checkpoint", "blocked", "403", "429")
+
 def download_video(url, height):
     fn = f"video_{int(time.time())}.mp4"
     base = ydl_opts(url)
@@ -109,6 +147,8 @@ def download_video(url, height):
         "best",
     ]
     last_err = None
+    fb_blocked = False
+
     for fmt in formats:
         try:
             with yt_dlp.YoutubeDL({**base, "outtmpl": fn, "format": fmt, "merge_output_format": "mp4"}) as ydl:
@@ -117,8 +157,9 @@ def download_video(url, height):
                 return fn
         except Exception as e:
             last_err = e
-            if any(k in str(e).lower() for k in ("cannot parse", "unsupported url", "please report")):
-                update_ytdlp()   # self-heal rồi thử lại
+            err_lower = str(e).lower()
+            if any(k in err_lower for k in ("cannot parse", "unsupported url", "please report")):
+                update_ytdlp()
                 try:
                     with yt_dlp.YoutubeDL({**base, "outtmpl": fn, "format": fmt, "merge_output_format": "mp4"}) as ydl:
                         ydl.download([url])
@@ -126,6 +167,17 @@ def download_video(url, height):
                         return fn
                 except Exception as e2:
                     last_err = e2
+                    err_lower = str(e2).lower()
+            if is_fb(url) and any(k in err_lower for k in _FB_BLOCK_KEYWORDS):
+                fb_blocked = True
+                break
+
+    if fb_blocked or (is_fb(url) and last_err):
+        try:
+            return download_fb_via_snapsave(url, height)
+        except Exception as snap_err:
+            raise Exception(f"Không tải được video Facebook\nLỗi 1: {last_err}\nLỗi 2: {snap_err}")
+
     raise last_err or Exception("Tải thất bại")
 
 def delete_later(name, fn, delay=3600):
@@ -156,40 +208,6 @@ def serve_video(name):
     if name in video_files and os.path.exists(video_files[name]):
         return send_file(video_files[name])
     return "Not found", 404
-
-@app.route("/upload-cookie", methods=["GET", "POST"])
-def upload_cookie():
-    """Upload Facebook cookies để bypass IP block của Render."""
-    if request.method == "POST":
-        cookie_text = request.form.get("cookie", "").strip()
-        platform    = request.form.get("platform", "facebook")
-        fname = {"facebook": "cookies_facebook.txt",
-                 "youtube":  "cookies_youtube.txt",
-                 "tiktok":   "cookies_tiktok.txt"}.get(platform, "cookies_facebook.txt")
-        if cookie_text:
-            with open(fname, "w", encoding="utf-8") as f:
-                f.write(cookie_text)
-            return f"<h2>✅ Đã lưu {fname}</h2><a href='/upload-cookie'>Upload thêm</a>"
-        return "<h2>❌ Cookie rỗng</h2><a href='/upload-cookie'>Thử lại</a>"
-
-    return """<!DOCTYPE html><html><head><meta charset="utf-8">
-<title>Upload Cookie</title>
-<style>body{font-family:sans-serif;max-width:700px;margin:40px auto;padding:0 20px}
-textarea{width:100%;height:200px;font-size:12px}
-select,button{margin-top:10px;padding:8px 16px;font-size:14px}
-button{background:#0088cc;color:white;border:none;border-radius:6px;cursor:pointer}</style>
-</head><body>
-<h2>🍪 Upload Cookies</h2>
-<p>Dùng extension <b>Get cookies.txt LOCALLY</b> → Export cookies từ facebook.com → Paste vào đây</p>
-<form method="POST">
-<select name="platform">
-  <option value="facebook">Facebook</option>
-  <option value="youtube">YouTube</option>
-  <option value="tiktok">TikTok</option>
-</select><br>
-<textarea name="cookie" placeholder="Paste nội dung file cookies.txt vào đây..."></textarea><br>
-<button type="submit">💾 Lưu Cookie</button>
-</form></body></html>"""
 
 # ── Bot handlers ──────────────────────────────────────────────────────────────
 @bot.message_handler(content_types=["text"])
@@ -244,19 +262,12 @@ def handle_res(call):
 
     except Exception as e:
         err = str(e).lower()
-        if any(k in err for k in ("cannot parse", "please report", "unsupported")):
-            msg = ("❌ Facebook chặn server (IP bị block)\n\n"
-                   f"👉 Truy cập để upload cookie:\n"
-                   f"{os.getenv('RENDER_EXTERNAL_URL','https://video-telegram-bot.onrender.com')}/upload-cookie\n\n"
-                   "Dùng extension 'Get cookies.txt LOCALLY' → Export từ facebook.com → Paste vào link trên")
+        if any(k in err for k in ("login", "sign in", "private", "riêng tư")):
+            msg = "❌ Video riêng tư hoặc yêu cầu đăng nhập, không thể tải"
         elif any(k in err for k in ("timed out", "timeout", "connection")):
-            msg = ("❌ Kết nối bị timeout\n\n"
-                   f"👉 Upload cookie tại:\n"
-                   f"{os.getenv('RENDER_EXTERNAL_URL','https://video-telegram-bot.onrender.com')}/upload-cookie")
-        elif any(k in err for k in ("login", "sign in", "private")):
-            msg = "❌ Video riêng tư hoặc yêu cầu đăng nhập"
+            msg = "❌ Kết nối bị timeout, thử lại sau ít phút"
         else:
-            msg = f"❌ Lỗi tải video\n\n{e}"
+            msg = f"❌ Không tải được video, thử lại hoặc dùng link khác\n\n🔧 {e}"
         try: bot.send_message(call.message.chat.id, msg)
         except Exception: pass
 
