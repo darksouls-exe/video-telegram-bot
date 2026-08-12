@@ -60,7 +60,6 @@ def clean_url(value):
 
     host = urlsplit(value).netloc.lower().split(":")[0]
 
-    # Resolve fb.watch hoặc fb.gg về link Facebook thật
     if host in {"fb.watch", "fb.gg"}:
         try:
             response = requests.get(
@@ -74,7 +73,6 @@ def clean_url(value):
         except requests.RequestException:
             pass
 
-    # Các link có ID số được chuyển sang dạng mobile dễ đọc hơn
     patterns = (
         r"facebook\.com/reel/(\d+)",
         r"facebook\.com/share/[vr]/(\d+)",
@@ -88,7 +86,7 @@ def clean_url(value):
         if match:
             return f"https://m.facebook.com/watch/?v={match.group(1)}"
 
-    # Giữ nguyên share/r/ vì mã của link này không phải ID số
+    # Giữ nguyên link share/r vì mã của link này không phải ID số
     return value
 
 
@@ -106,7 +104,7 @@ def ydl_options(url, **extra):
         },
     }
 
-    # Cookie chỉ đặt trên server, người dùng Telegram không cần cookie
+    # Cookie chỉ dùng trên server, người dùng Telegram không cần cookie
     if is_facebook(url) and os.path.exists("cookies_facebook.txt"):
         options["cookiefile"] = "cookies_facebook.txt"
 
@@ -152,7 +150,7 @@ def download_with_ytdlp(url, height):
     prefix = f"video_{uuid4().hex}"
     last_error = RuntimeError("yt-dlp không tạo được file video")
 
-    # Ưu tiên MP4 có sẵn để không cần ffmpeg trên Render
+    # Ưu tiên MP4 có sẵn, không cần ffmpeg trên Render
     formats = (
         f"best[height<={height}][ext=mp4]/best[height<={height}]/best",
         "best[ext=mp4]/best",
@@ -313,12 +311,18 @@ def download_video(url, height):
         except Exception as second_error:
             print("[fallback] failed:", second_error)
 
-            raise RuntimeError(
-                "Facebook đang chặn máy chủ hoặc video không công khai"
-            )
+            error_text = f"{first_error} {second_error}".lower()
+
+            if any(
+                word in error_text
+                for word in ("private", "login", "sign in")
+            ):
+                raise RuntimeError("FACEBOOK_PRIVATE")
+
+            raise RuntimeError("FACEBOOK_SERVER_BLOCKED")
 
 
-def resolution_buttons():
+def buttons():
     keyboard = InlineKeyboardMarkup()
 
     keyboard.row(
@@ -367,19 +371,15 @@ def video(name):
 
 @app.route("/upload-cookie", methods=["GET", "POST"])
 def upload_cookie():
-    """
-    Chỉ chủ bot dùng trang này.
-    Người dùng Telegram không cần upload cookie.
-    """
+    # Chỉ chủ bot dùng trang này
+    key = os.getenv("COOKIE_UPLOAD_KEY", "").strip()
 
-    upload_key = os.getenv("COOKIE_UPLOAD_KEY", "").strip()
-
-    supplied_key = (
+    supplied = (
         request.args.get("key", "").strip()
         or request.form.get("key", "").strip()
     )
 
-    if not upload_key or supplied_key != upload_key:
+    if not key or supplied != key:
         return "Not found", 404
 
     if request.method == "POST":
@@ -397,15 +397,17 @@ def upload_cookie():
 
         return "Facebook cookie saved on server."
 
-    safe_key = html.escape(supplied_key)
-
     return f"""
     <meta charset="utf-8">
     <h2>Facebook cookie</h2>
     <p>Chỉ chủ bot dùng trang này.</p>
 
     <form method="post">
-        <input type="hidden" name="key" value="{safe_key}">
+        <input
+            type="hidden"
+            name="key"
+            value="{html.escape(supplied)}"
+        >
 
         <textarea
             name="cookie"
@@ -435,13 +437,11 @@ def receive(message):
         with lock:
             pending[str(message.chat.id)] = url
 
-        # Facebook bỏ qua bước kiểm tra trước
-        # vì Facebook thường chặn bước extract_info
         if is_facebook(url):
             bot.reply_to(
                 message,
                 "🎬 Chọn độ phân giải:",
-                reply_markup=resolution_buttons(),
+                reply_markup=buttons(),
             )
             return
 
@@ -461,7 +461,7 @@ def receive(message):
         bot.send_message(
             message.chat.id,
             "🎬 Chọn độ phân giải:",
-            reply_markup=resolution_buttons(),
+            reply_markup=buttons(),
         )
 
     except Exception as error:
@@ -529,19 +529,19 @@ def choose_resolution(call):
             daemon=True,
         ).start()
 
-        base_url = os.getenv(
+        base = os.getenv(
             "RENDER_EXTERNAL_URL",
             "",
         ).rstrip("/")
 
-        if not base_url:
-            base_url = "https://your-service.onrender.com"
+        if not base:
+            base = "https://your-service.onrender.com"
 
         bot.send_message(
             call.message.chat.id,
             (
                 "📥 Video lớn, tải tại:\n"
-                f"{base_url}/video/{name}\n\n"
+                f"{base}/video/{name}\n\n"
                 "Link hết hạn sau 1 giờ"
             ),
         )
@@ -549,13 +549,30 @@ def choose_resolution(call):
     except Exception as error:
         print("[download] error:", error)
 
+        code = str(error)
+
+        if code == "FACEBOOK_PRIVATE":
+            message = (
+                "❌ Video này riêng tư hoặc yêu cầu đăng nhập Facebook.\n"
+                "Hãy thử một video công khai khác."
+            )
+
+        elif code == "FACEBOOK_SERVER_BLOCKED":
+            message = (
+                "❌ Facebook đang chặn máy chủ tải.\n\n"
+                "Người dùng không cần thao tác trên thiết bị của mình. "
+                "Chủ bot cần cấu hình cookie Facebook một lần trên server Render."
+            )
+
+        else:
+            message = (
+                "❌ Không tải được video. "
+                "Hãy thử lại với link công khai khác."
+            )
+
         bot.send_message(
             call.message.chat.id,
-            (
-                "❌ Không tải được video.\n"
-                "Video có thể riêng tư hoặc Facebook "
-                "đang chặn máy chủ."
-            ),
+            message,
         )
 
 
